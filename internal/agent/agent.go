@@ -3,7 +3,6 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -16,25 +15,31 @@ import (
 
 // Start 启动心跳上报
 func Start() {
-	serverURL := "http://127.0.0.1:8080/heartbeat"
+	// 1️⃣ 加载配置文件
+	if err := common.LoadConfig("config.yaml"); err != nil {
+		panic(err)
+	}
 
-	hostname, _ := os.Hostname()
+	// 2️⃣ 初始化日志系统
+	common.InitLogger(common.Cfg.LogLevel)
+
 	client := &http.Client{Timeout: 5 * time.Second}
+	hostname, _ := os.Hostname()
 
-	fmt.Println("[Agent] Started. Reporting to", serverURL)
+	common.Log.Infof("[Agent] Started. Reporting to %s", common.Cfg.ServerURL)
 
 	for {
 		// ==== 1. CPU 使用率（取 1 秒平均）====
 		cpuPercent, err := cpu.Percent(time.Second, false)
 		if err != nil || len(cpuPercent) == 0 {
-			fmt.Println("[Agent] CPU collect error:", err)
+			common.Log.Warnf("CPU collect error: %v", err)
 			continue
 		}
 
 		// ==== 2. 系统内存使用率 ====
 		vmStat, err := mem.VirtualMemory()
 		if err != nil {
-			fmt.Println("[Agent] Memory collect error:", err)
+			common.Log.Warnf("Memory collect error: %v", err)
 			continue
 		}
 
@@ -48,14 +53,14 @@ func Start() {
 
 		// ==== 4. 序列化并上报 ====
 		data, _ := json.Marshal(hb)
-		resp, err := client.Post(serverURL, "application/json", bytes.NewReader(data))
+		resp, err := client.Post(common.Cfg.ServerURL, "application/json", bytes.NewReader(data))
 		if err != nil {
-			fmt.Println("[Agent] Error:", err)
+			common.Log.Errorf("HTTP Post error: %v", err)
 		} else {
 			resp.Body.Close()
-			fmt.Printf("[Agent] Sent heartbeat ✅ CPU: %.2f%% | MEM: %.2f%%\n", hb.CPU, hb.MemMB)
+			common.Log.Infof("✅ Sent heartbeat | CPU: %.2f%% | MEM: %.2f%%", hb.CPU, hb.MemMB)
 		}
 
-		time.Sleep(3 * time.Second)
+		time.Sleep(time.Duration(common.Cfg.IntervalSec) * time.Second)
 	}
 }
